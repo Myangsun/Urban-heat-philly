@@ -1,0 +1,98 @@
+---
+title: "Urban Heat"
+format: html
+editor: visual
+embed-resources: true
+---
+
+```{r setup, include=FALSE}
+#| echo: false
+library(tidyverse)
+library(sf)
+library(tidycensus)
+library(tigris)
+library(gt)
+```
+
+## Census 
+
+```{r results = 'hide', message=FALSE, warning=FALSE}
+vars <- c(totpop = "B01001_001",
+          white = "B02001_002",
+          black = "B02001_003",
+          american_indian = "B02001_004",
+          asian = "B02001_005",
+          pacific = "B02001_006",
+          other = "B02001_007",
+          two_more_races = "B02001_008",
+          pop_below_poverty = "B17001_002",
+          pop_above_poverty = "B17001_031",
+          pop_in_labor = "B23025_002",
+          pop_in_labor_employed = "B23025_004",
+          pop_in_labor_unemployed = "B23025_005",
+          pop_in_labor_armed = "B23025_006",
+          pop_education = "B15003_001",
+          less_high_school = c("B15003_002","B15003_003","B15003_004","B15003_005","B15003_006","B15003_007","B15003_008","B15003_009","B15003_010","B15003_011","B15003_012","B15003_013","B15003_014","B15003_015","B15003_016"),
+          high_school = c("B15003_017","B15003_018"),
+          college = c("B15003_021","B15003_020","B15003_019"),
+          bachelor_higher = c("B15003_025","B15003_024","B15003_023","B15003_022"),
+          median_income = "B19013_001",
+          tenure_tot = "B25003_001",
+          tenure_owner = "B25003_002",
+          tenure_renter = "B25003_003",
+          median_house_value = "B25077_001",
+          housing_tot = "B25002_001",
+          occupied = "B25002_002",
+          vacent = "B25002_003")
+
+F_2022 <- get_acs(
+  geography = "tract",
+  state = "PA",
+  county = "Philadelphia",
+  variables = vars, 
+  output = "wide",
+  geometry = TRUE,
+  year = 2022)
+```
+
+```{r results = 'hide', message=FALSE, warning=FALSE}
+
+F_2022 <- F_2022 |>
+  # remove all Margin-of-error columns
+  select(-ends_with("M")) |>
+  # Clean up the column names
+  rename_with(~ str_remove(., "E$")) |>
+  mutate(less_high_school = rowSums(across(starts_with("less_high_school")))) |>
+  mutate(high_school = rowSums(across(starts_with("high_school")))) |>
+  mutate(college = rowSums(across(starts_with("college")))) |>
+  mutate(bachelor_higher = rowSums(across(starts_with("bachelor_higher")))) |>
+  select(-ends_with("1"), -ends_with("2"), -ends_with("3"), -ends_with("4"), -ends_with("5"),-ends_with("6"), -ends_with("7"),-ends_with("8"), -ends_with("9"), -ends_with("0"))
+```
+
+```{r}
+head(F_2022)
+```
+
+```{r results = 'hide', message=FALSE, warning=FALSE}
+options(tigris_use_cache=TRUE) # This is to allow tigris to use caching for downloaded data so that we don't need to fetch the same data again the next time you need it.
+
+# Download the boundary of Chicago. 
+chi_bnd <- 
+  places(state = "PA") |> 
+  filter(NAME == "Philadelphia")
+```
+
+```{r}
+F_2022 |> 
+  # Prepare for a faceted map
+  pivot_longer(cols = c(white, black),
+               names_to = "race_group", values_to = "group_pop") |> 
+  
+  ggplot() +
+    geom_sf(aes(fill = group_pop/totpop))+  
+    geom_sf(data = chi_bnd, color = "blue", 
+          linewidth = 0.5, fill = NA) +
+    facet_wrap(~ race_group) +
+    labs(fill = "Proportion of Total Population")+
+    theme_void()
+```
