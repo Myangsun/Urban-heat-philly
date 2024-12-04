@@ -14,7 +14,7 @@ library(tigris)
 library(gt)
 ```
 
-## Census 
+## Census
 
 ```{r results = 'hide', message=FALSE, warning=FALSE}
 vars <- c(totpop = "B01001_001",
