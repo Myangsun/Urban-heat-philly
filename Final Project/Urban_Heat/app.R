@@ -18,20 +18,17 @@ mean_lst_2020 <- mean(lst_2020$mean_LST_Celsius, na.rm = TRUE)
 overall_mean_temperature <- mean(c(mean_lst_2000, mean_lst_2010, mean_lst_2020), na.rm = TRUE)
 
 lst_2000 <- lst_2000 |>
-  mutate(GEOID = as.character(GEOID)) |>
-  mutate(Heat_Exposure_Score = mean_LST_Celsius - overall_mean_temperature)
+  mutate(GEOID = as.character(GEOID))
 lst_2010 <- lst_2010 |>
-  mutate(GEOID = as.character(GEOID)) |>
-  mutate(Heat_Exposure_Score = mean_LST_Celsius - overall_mean_temperature)
+  mutate(GEOID = as.character(GEOID))
 lst_2020 <- lst_2020 |>
-  mutate(GEOID = as.character(GEOID)) |>
-  mutate(Heat_Exposure_Score = mean_LST_Celsius - overall_mean_temperature)
+  mutate(GEOID = as.character(GEOID))
 
 # Set the TIGER options for downloading
 options(tigris_class = "sf") # Ensure data is downloaded as sf objects
 options(tigris_use_cache = TRUE) # Cache downloaded files for reuse
 
-# Download census tracts for Pennsylvania (2010)
+# Download census tracts for Pennsylvania (2020)
 philly_tracts <- tracts(
   state = "PA",         # State abbreviation
   county = "Philadelphia", # County name
@@ -39,24 +36,80 @@ philly_tracts <- tracts(
   year = 2020           # Specify the year (2010 Census)
 )
 
+# Download the boundary
+chi_bnd <- 
+  places(state = "PA") |> 
+  filter(NAME == "Philadelphia")
+
+
+
 # Merge each year's LST data with the shapefile
 lst_2000_sf <- philly_tracts |>
-  left_join(lst_2000, by = "GEOID")
+  left_join(lst_2000, by = "GEOID")|> st_transform(4326)
 
 lst_2010_sf <- philly_tracts |>
-  left_join(lst_2010, by = "GEOID")
+  left_join(lst_2010, by = "GEOID")|> st_transform(4326)
 
 lst_2020_sf <- philly_tracts |>
-  left_join(lst_2020, by = "GEOID")
+  left_join(lst_2020, by = "GEOID")|> st_transform(4326)
+
+chi_bnd <- chi_bnd |> st_transform(4326)
+
+# Load water or open space shapefile
+water_sf <- st_read("Hydrographic_Features_Poly/Hydrographic_Features_Poly.shp") |> st_transform(4326)
+open_space_sf <- st_read("PPR_Properties/PPR_Properties.shp") |> st_transform(4326)
+water_sf <- st_make_valid(water_sf)
+open_space_sf <- st_make_valid(open_space_sf)
+
+# Perform spatial intersection to keep features within the boundary
+#water_sf <- st_intersection(water_sf, chi_bnd) 
+#open_space_sf <- st_intersection(open_space_sf, chi_bnd)
 
 # Find the global range of temperatures across all datasets
 global_min <- min(lst_2000_sf$mean_LST_Celsius, lst_2010_sf$mean_LST_Celsius, lst_2020_sf$mean_LST_Celsius, na.rm = TRUE)
 global_max <- max(lst_2000_sf$mean_LST_Celsius, lst_2010_sf$mean_LST_Celsius, lst_2020_sf$mean_LST_Celsius, na.rm = TRUE)
 
+# Calculate Heat Exposure Score and Normalize to 0-1
+# Function to calculate normalized heat exposure score
+calculate_normalized_score <- function(data) {
+  data |>
+    mutate(
+      Mean_LST = mean(mean_LST_Celsius, na.rm = TRUE),
+      SD_LST = sd(mean_LST_Celsius, na.rm = TRUE),
+      Normalized_Heat_Score = (mean_LST_Celsius - Mean_LST) / SD_LST
+    )
+}
 
-# Load water or open space shapefile
-water_sf <- st_read("Hydrographic_Features_Poly/Hydrographic_Features_Poly.shp")
-open_space_sf <- st_read("PPR_Properties/PPR_Properties.shp")
+# Apply the function to each dataset
+lst_2000_sf <- lst_2000_sf |> calculate_normalized_score()
+lst_2010_sf <- lst_2010_sf |> calculate_normalized_score()
+lst_2020_sf <- lst_2020_sf |> calculate_normalized_score()
+
+# Calculate global range for Normalized Heat Scores
+global_normalized_min <- min(c(
+  lst_2000_sf$Normalized_Heat_Score,
+  lst_2010_sf$Normalized_Heat_Score,
+  lst_2020_sf$Normalized_Heat_Score
+), na.rm = TRUE)
+
+global_normalized_max <- max(c(
+  lst_2000_sf$Normalized_Heat_Score,
+  lst_2010_sf$Normalized_Heat_Score,
+  lst_2020_sf$Normalized_Heat_Score
+), na.rm = TRUE)
+
+# Function to scale values to the range [-1, 1]
+scale_to_minus_one_to_one <- function(data) {
+  data |>
+    mutate(
+      Heat_Exposure_Score = 2 * (Normalized_Heat_Score - global_normalized_min) / (global_normalized_max - global_normalized_min) - 1
+    )
+}
+
+# Apply the scaling function to each dataset
+lst_2000_sf <- scale_to_minus_one_to_one(lst_2000_sf)
+lst_2010_sf <- scale_to_minus_one_to_one(lst_2010_sf)
+lst_2020_sf <- scale_to_minus_one_to_one(lst_2020_sf)
 
 # Define the UI
 ui <- navbarPage(
@@ -70,19 +123,35 @@ ui <- navbarPage(
     )
   ),
   tabPanel(
-    "LST Map Viewer",
-    fluidPage(
-      sidebarLayout(
-        sidebarPanel(
-          selectInput("year", "Select Year:",
-                      choices = c("2000", "2010", "2020"),
-                      selected = "2000")
-        ),
-        mainPanel(
-          leafletOutput("map", height = "600px")
-        )
-      )
+    "Map Viewer",
+fluidPage(
+  titlePanel("Philadelphia Urban Heat Vulnerability"),
+  
+  # Year Selection
+  fluidRow(
+    column(12, 
+           selectInput(
+             "year", "Select Year:",
+             choices = c("2000", "2010", "2020"),
+             selected = "2000",
+             width = "50%"
+           )
     )
+  ),
+  
+  # Titles and Three Maps in a Row
+  fluidRow(
+    column(4, align = "center",
+           tags$h4("Heat Exposure Map"),
+           leafletOutput("heat_exposure_map", height = "600px")),
+    column(4, align = "center",
+           tags$h4("Demographic Map"),
+           leafletOutput("demographic_map", height = "600px")),
+    column(4, align = "center",
+           tags$h4("Heat Vulnerability Map"),
+           leafletOutput("heat_vulnerability_map", height = "600px"))
+  )
+)
   ),
   tabPanel(
     "Data Summary",
@@ -100,9 +169,7 @@ ui <- navbarPage(
   )
 )
 
-# Define the server logic
 server <- function(input, output, session) {
-  # Reactive function to return the selected dataset
   selected_data <- reactive({
     if (input$year == "2000") {
       lst_2000_sf
@@ -113,85 +180,135 @@ server <- function(input, output, session) {
     }
   })
   
-  # Render the Leaflet map
-  output$map <- renderLeaflet({
-    leaflet() |>
-      setView(lng = -75.1652, lat = 39.9526, zoom = 11) |>
+  # Get the centroid
+  centroid <- st_centroid(chi_bnd)
+  
+  # Extract latitude and longitude
+  centroid_coords <- st_coordinates(centroid)
+  
+  lat_philly <- centroid_coords[2]
+  lng_philly <- centroid_coords[1]
+  
+  output$heat_exposure_map <- renderLeaflet({
+    data <- selected_data()
+    pal <- colorNumeric(palette = rev(viridis::viridis(256)), domain = data$mean_LST_Celsius)
+    pal_heat <- colorNumeric(palette = "YlOrRd", domain = data$Heat_Exposure_Score)
+    
+    leaflet(data) |>
+      setView(lng = lng_philly, lat = lat_philly, zoom = 11) |>
+      addProviderTiles(providers$CartoDB.Positron, group = "CartoDB Positron") |>
+      addProviderTiles(providers$Esri.WorldImagery, group = "ESRI World Imagery") |>
+      addProviderTiles(providers$CartoDB.DarkMatter, group = "CartoDB Dark") |>
+      # addPolygons(
+      #   fillColor = ~pal(mean_LST_Celsius),
+      #   color = "white", weight = 0.5, fillOpacity = 1,
+      #   popup = ~paste0(
+      #     "GEOID: ", GEOID,
+      #     "<br>Mean LST: ", round(mean_LST_Celsius, 2), " °C",
+      #     "<br>Heat Exposure Score: ", round(Heat_Exposure_Score, 2)
+      #   ),
+      #   group = "Mean LST"
+      # ) |>
+      addPolygons(
+        fillColor = ~pal_heat(Heat_Exposure_Score),
+        color = "white", weight = 0.5, fillOpacity = 1,
+        popup = ~paste0(
+          "GEOID: ", GEOID,
+          "<br>Heat Exposure Score: ", round(Heat_Exposure_Score, 2)
+        ),
+        group = "Heat Exposure Score"
+      ) |>
+      addPolygons(
+        data = water_sf,
+        color = "#40798c", weight = 0.5, fillOpacity = 1,
+        group = "Water Features"
+      ) |>
+      addPolygons(
+        data = open_space_sf,
+        color = "#cfe0c3", weight = 0.5, fillOpacity = 1,
+        group = "Open Space"
+      ) |>
+      # addLegend(
+      #   pal = pal, values = data$mean_LST_Celsius,
+      #   title = "Mean LST (°C)", position = "bottomright", group = "Mean LST"
+      # ) |>
+      addLegend(
+        pal = pal_heat, values = c(-1,1),
+        title = "Heat Exposure Score", position = "bottomright", group = "Heat Exposure Score"
+      ) |>
+      addLayersControl(
+        baseGroups = c("CartoDB Positron", "ESRI World Imagery", "CartoDB Dark"),
+        #overlayGroups = c("Mean LST", "Heat Exposure Score", "Water Features", "Open Space"),
+        overlayGroups = c("Heat Exposure Score", "Water Features", "Open Space"),
+        options = layersControlOptions(collapsed = TRUE)
+      )
+  })
+  
+  # Render Demographic Map
+  output$demographic_map <- renderLeaflet({
+    # Example demographic data
+    data <- selected_data()
+    pal_demo <- colorNumeric(palette = "Blues", domain = data$demographic_variable) # Replace `demographic_variable`
+    
+    leaflet(data)|>
+      setView(lng = lng_philly, lat = lat_philly, zoom = 11) |>
       addProviderTiles(providers$CartoDB.Positron, group = "CartoDB Positron") |>
       addProviderTiles(providers$Esri.WorldImagery, group = "ESRI World Imagery") |>
       addProviderTiles(providers$CartoDB.DarkMatter, group = "CartoDB Dark") |>
       addLayersControl(
         baseGroups = c("CartoDB Positron", "ESRI World Imagery", "CartoDB Dark"),
         overlayGroups = c("Water Features", "Open Space"),
-        options = layersControlOptions(collapsed = FALSE)
-      )
-  })
-  
-  observe({
-    data <- selected_data()
-    pal <- colorNumeric(palette = rev(viridis::viridis(256)), domain = c(global_min, global_max))
-    
-    # Define color palette for Heat Exposure Score
-    pal_heat <- colorNumeric(palette = "YlOrRd", domain = data$Heat_Exposure_Score)
-    
-    leafletProxy("map", data = data) %>%
-      clearShapes() %>%
-      clearControls() %>%
-      # Add polygons for Mean LST
-      addPolygons(
-        fillColor = ~pal(mean_LST_Celsius),
-        color = "white", weight = 0.5, fillOpacity = 0.7,
-        popup = ~paste0(
-          "GEOID: ", GEOID, 
-          "<br>Mean LST: ", round(mean_LST_Celsius, 2), " °C",
-          "<br>Heat Exposure Score: ", round(Heat_Exposure_Score, 2)
-        ),
-        group = "Mean LST"
-      ) %>%
-      # Add polygons for Heat Exposure Score
-      addPolygons(
-        fillColor = ~pal_heat(Heat_Exposure_Score),
-        color = "white", weight = 0.5, fillOpacity = 0.7,
-        popup = ~paste0(
-          "GEOID: ", GEOID,
-          "<br>Heat Exposure Score: ", round(Heat_Exposure_Score, 2)
-        ),
-        group = "Heat Exposure Score"
-      ) %>%
+        options = layersControlOptions(collapsed = TRUE)
+      ) |>
       # Add water features
       addPolygons(
         data = water_sf,
-        color = "blue", weight = 0.5, fillOpacity = 1,
+        color = "#40798c", weight = 0.5, fillOpacity = 1,
         group = "Water Features"
-      ) %>%
+      ) |>
       # Add open space
       addPolygons(
         data = open_space_sf,
-        color = "green", weight = 0.5, fillOpacity = 1,
+        color = "#cfe0c3", weight = 0.5, fillOpacity = 1,
         group = "Open Space"
-      ) %>%
-      # Add legends for each layer
-      addLegend(
-        pal = pal, values = c(global_min, global_max),
-        title = "Mean LST (°C)", position = "bottomright", group = "Mean LST"
-      ) %>%
-      addLegend(
-        pal = pal_heat, values = range(data$Heat_Exposure_Score, na.rm = TRUE),
-        title = "Heat Exposure Score", position = "bottomright", group = "Heat Exposure Score"
-      ) %>%
-      # Add layer control
+      ) 
+  })
+  
+  # Render Heat Vulnerability Score Map
+  output$heat_vulnerability_map <- renderLeaflet({
+    data <- selected_data()
+    pal_vuln <- colorNumeric(palette = "RdYlGn", domain = c(-1, 1))
+    
+    leaflet(data)|>
+      setView(lng = lng_philly, lat = lat_philly, zoom = 11) |>
+      addProviderTiles(providers$CartoDB.Positron, group = "CartoDB Positron") |>
+      addProviderTiles(providers$Esri.WorldImagery, group = "ESRI World Imagery") |>
+      addProviderTiles(providers$CartoDB.DarkMatter, group = "CartoDB Dark") |>
       addLayersControl(
-        overlayGroups = c("Mean LST", "Heat Exposure Score", "Water Features", "Open Space"),
-        options = layersControlOptions(collapsed = FALSE)
-      )
+        baseGroups = c("CartoDB Positron", "ESRI World Imagery", "CartoDB Dark"),
+        overlayGroups = c("Water Features", "Open Space"),
+        options = layersControlOptions(collapsed = TRUE)
+      ) |>
+      # Add water features
+      addPolygons(
+        data = water_sf,
+        color = "#40798c", weight = 0.5, fillOpacity = 1,
+        group = "Water Features"
+      ) |>
+      # Add open space
+      addPolygons(
+        data = open_space_sf,
+        color = "#cfe0c3", weight = 0.5, fillOpacity = 1,
+        group = "Open Space"
+      ) 
   })
   
   output$boxplot_all <- renderPlot({
     # Combine all datasets
     combined_data <- bind_rows(
-      lst_2000 %>% mutate(Year = 2000),
-      lst_2010 %>% mutate(Year = 2010),
-      lst_2020 %>% mutate(Year = 2020)
+      lst_2000 |> mutate(Year = 2000),
+      lst_2010 |> mutate(Year = 2010),
+      lst_2020 |> mutate(Year = 2020)
     )
     
     # Create the boxplot
