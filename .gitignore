@@ -1,3 +1,6 @@
+.Rproj.user
+.RData
+.Rhistory
 
 # Ignore all .log files
 *.log
