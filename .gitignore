@@ -1,4 +1,14 @@
-.Rproj.user
-.Rhistory
-.RData
-.Ruserdata
+
+# Ignore all .log files
+*.log
+
+# Ignore node_modules folder
+node_modules/
+
+# Ignore specific file
+secret-config.json
+
+# Ignore all files in a folder
+temp/
+
+.DS_Store
