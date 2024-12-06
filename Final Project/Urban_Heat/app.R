@@ -153,20 +153,35 @@ fluidPage(
   )
 )
   ),
-  tabPanel(
-    "Data Summary",
-    fluidPage(
-      h3("Data Summary for Land Surface Temperature (LST)"),
-      p("This section provides an overview of the LST data, including distribution and trends across years."),
-      plotOutput("boxplot_all", height = "300px"),  # Boxplot for all years combined
-      plotOutput("histogram_all", height = "300px"),  # Histogram for all years combined
-      plotOutput("trend_plot", height = "300px"),  # Line plot of average LST trends over time
-      h4("Overall Mean Temperature"),
-      textOutput("overall_mean"),
-      h4("Insights"),
-      p("The visualizations above provide a detailed look into the LST data. The boxplot shows the spread of temperatures, while the histogram highlights the frequency distribution.")
+tabPanel(
+  "Data Summary",
+  fluidPage(
+    h3("Data Summary for Land Surface Temperature (LST)"),
+    fluidRow(
+      # Left column for text and explanations
+      column(
+        width = 6,
+        h4("Overview"),
+        p("This section provides an overview of the LST data, including distribution and trends across years."),
+        h4("Overall Mean Temperature"),
+        textOutput("overall_mean"),
+        h4("Insights"),
+        p("The visualizations to the right provide a detailed look into the LST data."),
+        p("- The boxplot shows the spread of temperatures across years."),
+        p("- The histogram highlights the frequency distribution of temperatures."),
+        p("- The trend plot illustrates how the average LST has changed over time.")
+      ),
+      # Right column for charts
+      column(
+        width = 6,
+        h4("Visualizations"),
+        plotOutput("boxplot_all", height = "300px"),  # Boxplot for all years combined
+        plotOutput("histogram_all", height = "300px"),  # Histogram for all years combined
+        plotOutput("trend_plot", height = "300px")  # Line plot of average LST trends over time
+      )
     )
   )
+)
 )
 
 server <- function(input, output, session) {
