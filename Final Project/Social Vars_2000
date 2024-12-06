@@ -1,0 +1,80 @@
+library(tidyverse)
+library(sf)
+library(tidycensus)
+library(tigris)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(readr)
+
+
+
+#census_api_key("f40fb4aa2b6aaa626e8a9b3b70baa703ef265d65", install = TRUE)
+
+options(tigris_use_cache = TRUE)
+
+
+F_2000_A <- st_read("/Users/summercooke/Desktop/Applied/Final/F_2000_A.shp")
+F_2010_A <- st_read("/Users/summercooke/Desktop/Applied/Final/F_2010_A.shp")
+F_2020_A <- st_read("/Users/summercooke/Desktop/Applied/Final/F_2020_A.shp")
+tree_2023 <- st_read("/Users/summercooke/Desktop/Applied/Final/tree_2023.shp")
+hicov_2020 <-st_read("/Users/summercooke/Desktop/Applied/Final/hicov_2020.shp")
+
+hospital_locations <- st_read("/Users/summercooke/Desktop/Applied/Final/DOH_Hospitals202311/DOH_Hospitals202311.shp")
+
+tract_geometries2020 <- tracts(state = "PA", county = "Philadelphia", year = 2020, cb = TRUE) %>%
+  st_transform(crs = 4326) %>%
+  st_make_valid() 
+
+phi_tracts <- tract_geometries2020
+```
+
+Calc SV- 2000
+```{r}
+F_2000 <- F_2000_A %>%
+  mutate(
+    O62_norm = ( T_62__O - min(T_62__O, na.rm = TRUE)) / 
+                   (max(T_62__O, na.rm = TRUE) - min(T_62__O, na.rm = TRUE)),
+    U5_norm = (Ttl_U_5 - min(Ttl_U_5, na.rm = TRUE)) / 
+                   (max(Ttl_U_5, na.rm = TRUE) - min(Ttl_U_5, na.rm = TRUE)),
+   OHH_norm = (on_prs_ - min(on_prs_, na.rm = TRUE)) / 
+                                 (max(on_prs_, na.rm = TRUE) - min(on_prs_, na.rm = TRUE)),
+   B_pov_norm = (ttl_bl_ - min(ttl_bl_, na.rm = TRUE)) / 
+                         (max(ttl_bl_, na.rm = TRUE) - min(ttl_bl_, na.rm = TRUE)),
+    popd_norm = (pp_dnst - min(pp_dnst, na.rm = TRUE)) / 
+                              (max(pp_dnst, na.rm = TRUE) - min(pp_dnst, na.rm = TRUE)),
+   m_sal_norm = (mdn_hs_ - min(mdn_hs_, na.rm = TRUE)) / 
+                              (max(mdn_hs_, na.rm = TRUE) - min(mdn_hs_, na.rm = TRUE))
+  )
+
+
+
+F_2000_SV <- F_2000 %>%
+  mutate(
+    socioeconomic_vulnerability_raw = (
+      O62_norm * 0.3 +
+      U5_norm * 0.2 +
+      OHH_norm * 0.1 +
+      B_pov_norm * 0.4  +
+      m_sal_norm * 0.1
+    )
+  )
+
+F_2000_SV <- F_2000_SV %>%
+  mutate(
+    socioeconomic_vulnerability = 1 + 9 * (
+      socioeconomic_vulnerability_raw - min(socioeconomic_vulnerability_raw, na.rm = TRUE)
+    ) / (max(socioeconomic_vulnerability_raw, na.rm = TRUE) - min(socioeconomic_vulnerability_raw, na.rm = TRUE))
+  )
+
+
+library(ggplot2)
+
+ggplot() +
+  geom_sf(data = F_2000_SV, aes(fill = socioeconomic_vulnerability), color = NA) +
+  scale_fill_viridis_c(name = "Vulnerability Index (1-10)") +
+  labs(
+    title = "Socioeconomic Vulnerability Index by Census Tract",
+    subtitle = "Scores range from 1 (low vulnerability) to 10 (high vulnerability)"
+  ) +
+  theme_minimal()
