@@ -1,13 +1,14 @@
 ---
-title: "blank"
+title: "Applied"
 format: html
 editor: visual
 ---
+
 ```{r}
 # NOTES
 
-#sccnm_ = socioeconomic_vulnerability_raw
-#sccnmc_ = socioeconomic_vulnerability
+
+#sccnmc_v = socioeconomic_vulnerability
 ```
 
 ```{r}
@@ -25,10 +26,9 @@ library(tigris)
 
 options(tigris_use_cache = TRUE)
 
-SV_2000 <- st_read("Social_Vul_Data/F_2000/SV_2000.shp") %>% st_transform(4326)
-SV_2010 <- st_read("Social_Vul_Data/F_2010/SV_2010.shp") %>% st_transform(4326)
-SV_2020 <- st_read("Social_Vul_Data/F_2020/SV_2020.shp") %>% 
-st_transform(4326)
+SV_2000 <- st_read("Social_Vul_Data/F_2000/SV_2000_3.shp") %>% st_transform(4326) |> st_as_sf()
+SV_2010 <- st_read("Social_Vul_Data/F_2010/SV_2010_3.shp") %>% st_transform(4326) |> st_as_sf()
+SV_2020 <- st_read("Social_Vul_Data/F_2020/SV_2020_3.shp") %>% st_transform(4326) |> st_as_sf()
 
 Tree_2023 <- st_read("Social_Vul_Data/Extras (Tree:popden)/tree_2023.shp") %>% st_transform(4326)
 H_2020 <-st_read("Social_Vul_Data/Extras (Tree:popden)/HealthC_2020.shp") %>% st_transform(4326)
@@ -38,6 +38,7 @@ H_2020 <-st_read("Social_Vul_Data/Extras (Tree:popden)/HealthC_2020.shp") %>% st
 
 ```{r}
 #Visability For SV 2000 Calcs
+# NEed to cooredtt
 
 #SV_2000 <- SV_2000 %>%
 #mutate( socioeconomic_vulnerability_raw = ( O62_norm * 0.3 + U5_norm * 0.2 + OHH_norm * 0.1 + B_pov_norm * 0.4  + m_sal_norm * 0.1))
@@ -67,6 +68,180 @@ H_2020 <-st_read("Social_Vul_Data/Extras (Tree:popden)/HealthC_2020.shp") %>% st
 #sccnmc_ = socioeconomic_vulnerability
 ```
 
+```{r}
+summary(SV_2000$sccnmc_v)
+summary(SV_2010$sccnmc_v)
+summary(SV_2020$sccnmc_v)
+```
+
+```{r}
+
+#Original heat
+# Read in the CSV files
+lst_2000 <- read.csv("Philadelphia_Landsat7_LST_2000.csv")
+lst_2010 <- read.csv("Philadelphia_Landsat7_LST_2010.csv")
+lst_2020 <- read.csv("Philadelphia_Landsat7_LST_2020.csv")
+
+# Compute mean LST for each dataset
+mean_lst_2000 <- mean(lst_2000$mean_LST_Celsius, na.rm = TRUE)
+mean_lst_2010 <- mean(lst_2010$mean_LST_Celsius, na.rm = TRUE)
+mean_lst_2020 <- mean(lst_2020$mean_LST_Celsius, na.rm = TRUE)
+overall_mean_temperature <- mean(c(mean_lst_2000, mean_lst_2010, mean_lst_2020), na.rm = TRUE)
+
+lst_2000 <- lst_2000 |>
+  mutate(GEOID = as.character(GEOID))
+lst_2010 <- lst_2010 |>
+  mutate(GEOID = as.character(GEOID))
+lst_2020 <- lst_2020 |>
+  mutate(GEOID = as.character(GEOID))
+
+# Set the TIGER options for downloading
+options(tigris_class = "sf") # Ensure data is downloaded as sf objects
+options(tigris_use_cache = TRUE) # Cache downloaded files for reuse
+
+# Download census tracts for Pennsylvania (2020)
+philly_tracts <- tracts(
+  state = "PA",         # State abbreviation
+  county = "Philadelphia", # County name
+  cb = FALSE,           # Use detailed TIGER/Line boundaries (not simplified)
+  year = 2020           # Specify the year (2010 Census)
+)
+
+# Merge each year's LST data with the shapefile
+lst_2000_sf <- philly_tracts |>
+  left_join(lst_2000, by = "GEOID")|> st_transform(4326)
+
+lst_2010_sf <- philly_tracts |>
+  left_join(lst_2010, by = "GEOID")|> st_transform(4326)
+
+lst_2020_sf <- philly_tracts |>
+  left_join(lst_2020, by = "GEOID")|> st_transform(4326)
+
+# Perform spatial intersection to keep features within the boundary
+#water_sf <- st_intersection(water_sf, chi_bnd) 
+#open_space_sf <- st_intersection(open_space_sf, chi_bnd)
+
+# Find the global range of temperatures across all datasets
+global_min <- min(lst_2000_sf$mean_LST_Celsius, lst_2010_sf$mean_LST_Celsius, lst_2020_sf$mean_LST_Celsius, na.rm = TRUE)
+global_max <- max(lst_2000_sf$mean_LST_Celsius, lst_2010_sf$mean_LST_Celsius, lst_2020_sf$mean_LST_Celsius, na.rm = TRUE)
+
+# Calculate Heat Exposure Score and Normalize to 0-1
+# Function to calculate normalized heat exposure score
+calculate_normalized_score <- function(data) {
+  data |>
+    mutate(
+      Mean_LST = mean(mean_LST_Celsius, na.rm = TRUE),
+      SD_LST = sd(mean_LST_Celsius, na.rm = TRUE),
+      Normalized_Heat_Score = (mean_LST_Celsius - Mean_LST) / SD_LST
+    )
+}
+
+# Apply the function to each dataset
+lst_2000_sf <- lst_2000_sf |> calculate_normalized_score()
+lst_2010_sf <- lst_2010_sf |> calculate_normalized_score()
+lst_2020_sf <- lst_2020_sf |> calculate_normalized_score()
+
+# Calculate global range for Normalized Heat Scores
+global_normalized_min <- min(c(
+  lst_2000_sf$Normalized_Heat_Score,
+  lst_2010_sf$Normalized_Heat_Score,
+  lst_2020_sf$Normalized_Heat_Score
+), na.rm = TRUE)
+
+global_normalized_max <- max(c(
+  lst_2000_sf$Normalized_Heat_Score,
+  lst_2010_sf$Normalized_Heat_Score,
+  lst_2020_sf$Normalized_Heat_Score
+), na.rm = TRUE)
+
+# Function to scale values to the range [-1, 1]
+scale_to_minus_one_to_one <- function(data) {
+  data |>
+    mutate(
+      Heat_Exposure_Score = 2 * (Normalized_Heat_Score - global_normalized_min) / (global_normalized_max - global_normalized_min) - 1
+    )
+}
+
+# Apply the scaling function to each dataset
+lst_2000_sf <- scale_to_minus_one_to_one(lst_2000_sf)
+lst_2010_sf <- scale_to_minus_one_to_one(lst_2010_sf)
+lst_2020_sf <- scale_to_minus_one_to_one(lst_2020_sf)
+```
+
+```{r}
+lst_2000_sf <- lst_2000_sf |> 
+  st_drop_geometry() |> 
+  left_join(SV_2000 |> st_drop_geometry(), by = "GEOID") |>
+  select(GEOID,mean_LST_Celsius,Heat_Exposure_Score,sccnmc_v)
+```
+
+```{r}
+lst_2010_sf <- lst_2010_sf |> 
+  st_drop_geometry() |> 
+  left_join(SV_2010 |> st_drop_geometry(), by = "GEOID") |>
+  select(GEOID,mean_LST_Celsius,Heat_Exposure_Score,sccnmc_v)
+```
+
+```{r}
+lst_2020_sf <- lst_2020_sf |> 
+  st_drop_geometry() |> 
+  left_join(SV_2020 |> st_drop_geometry(), by = "GEOID") |>
+  select(GEOID,mean_LST_Celsius,Heat_Exposure_Score,sccnmc_v)
+```
+
+```{r}
+lst_2000_sf <- lst_2000_sf |>
+  left_join(philly_tracts, by = "GEOID")|> st_as_sf() |> st_transform(4326)|>
+  select(GEOID,geometry, mean_LST_Celsius,Heat_Exposure_Score,sccnmc_v)
+lst_2010_sf <- lst_2010_sf |>
+  left_join(philly_tracts, by = "GEOID")|> st_as_sf() |> st_transform(4326)|>
+  select(GEOID,geometry, mean_LST_Celsius,Heat_Exposure_Score,sccnmc_v)
+lst_2020_sf <- lst_2020_sf |>
+  left_join(philly_tracts, by = "GEOID")|> st_as_sf() |> st_transform(4326)|>
+  select(GEOID,geometry, mean_LST_Celsius,Heat_Exposure_Score,sccnmc_v)
+```
+
+```{r}
+lst_2000_sf <- lst_2000_sf |>
+  mutate(v = Heat_Exposure_Score + sccnmc_v)
+lst_2010_sf <- lst_2010_sf |>
+  mutate(v = Heat_Exposure_Score + sccnmc_v)
+lst_2020_sf <- lst_2020_sf |>
+  mutate(v = Heat_Exposure_Score + sccnmc_v)
+
+```
+
+```{r}
+lst_2000_sf<-lst_2000_sf |> mutate(scaled_v = 2 * (v - min(v)) / (max(v) - min(v)) - 1)
+summary(lst_2000_sf$scaled_v)
+lst_2010_sf<-lst_2010_sf |> mutate(scaled_v = 2 * (v - min(v)) / (max(v) - min(v)) - 1)
+summary(lst_2010_sf$scaled_v)
+lst_2020_sf<-lst_2020_sf |> mutate(scaled_v = 2 * (v - min(v)) / (max(v) - min(v)) - 1)
+summary(lst_2020_sf$scaled_v)
+```
+
+```{r}
+lst_2000_sf<-lst_2000_sf |> 
+  mutate(
+    top_10_percent = ifelse(scaled_v >= quantile(scaled_v, 0.9), 1, 0)
+  )
+lst_2010_sf<-lst_2010_sf |> 
+  mutate(
+    top_10_percent = ifelse(scaled_v >= quantile(scaled_v, 0.9), 1, 0)
+  )
+lst_2020_sf<-lst_2020_sf |> 
+  mutate(
+    top_10_percent = ifelse(scaled_v >= quantile(scaled_v, 0.9), 1, 0)
+  )
+```
+
+```{r}
+st_write(lst_2000_sf,"lst_2000_sf.shp")
+st_write(lst_2010_sf,"lst_2010_sf.shp")
+st_write(lst_2020_sf,"lst_2020_sf.shp")
+```
+
+##SHINNY APP
 
 ```{r}
 # Read in the CSV files
@@ -103,7 +278,6 @@ philly_tracts <- tracts(
 chi_bnd <- 
   places(state = "PA") |> 
   filter(NAME == "Philadelphia")
-
 
 
 # Merge each year's LST data with the shapefile
@@ -173,7 +347,9 @@ scale_to_minus_one_to_one <- function(data) {
 lst_2000_sf <- scale_to_minus_one_to_one(lst_2000_sf)
 lst_2010_sf <- scale_to_minus_one_to_one(lst_2010_sf)
 lst_2020_sf <- scale_to_minus_one_to_one(lst_2020_sf)
+```
 
+```{r}
 # Define the UI
 ui <- navbarPage(
   title = "Philadelphia Urban Heat Vulnerability",
@@ -192,31 +368,36 @@ fluidPage(
   
   # Year Selection
   fluidRow(
-    column(12, 
+    column(4, align = "center",
+           tags$h4("Heat Exposure Map"),
            selectInput(
              "year", "Select Year:",
              choices = c("2000", "2010", "2020"),
              selected = "2000",
-             width = "50%"
-           )
-    )
-  ),
-  
-  # Titles and Three Maps in a Row
-  fluidRow(
-    column(4, align = "center",
-           tags$h4("Heat Exposure Map"),
-           leafletOutput("heat_exposure_map", height = "600px")),
-    column(4, align = "center",
-           tags$h4("Demographic Map"),
-           leafletOutput("demographic_map", height = "600px")),
+             width = "100%"
+           ),
+           leafletOutput("heat_exposure_map", height = "600px")
+    ),
+    
+# socioeconomic_vulnerability_map with Dropdown
+column(4, align = "center",
+  tags$h4("Socioeconomic Vulnerability"),
+  selectInput(
+    "socio_year", "Select Year:",
+  choices = c("2000", "2010", "2020"),
+  selected = "2020",
+  width = "100%"
+       ),
+  leafletOutput("socioeconomic_vulnerability_map", height = "600px")
+),
+    
+    # Heat Vulnerability Map
     column(4, align = "center",
            tags$h4("Heat Vulnerability Map"),
-           leafletOutput("heat_vulnerability_map", height = "600px"))
-  )
-)
-  ),
-  tabPanel(
+           leafletOutput("heat_vulnerability_map", height = "600px"))))),
+  
+
+tabPanel(
     "Data Summary",
     fluidPage(
       h3("Data Summary for Land Surface Temperature (LST)"),
@@ -232,6 +413,21 @@ fluidPage(
   )
 )
 
+  # Titles and Three Maps in a Row
+  fluidRow(
+    column(4, align = "center",
+           tags$h4("Heat Exposure Map"),
+           leafletOutput("heat_exposure_map", height = "600px")),
+    column(4, align = "center",
+           tags$h4("Socioeconomic Vulnerability Map"),
+           leafletOutput("socioeconomic_vulnerability_map", height = "600px")),
+    column(4, align = "center",
+           tags$h4("Heat Vulnerability Map"),
+           leafletOutput("heat_vulnerability_map", height = "600px"))
+  )
+
+  
+
 server <- function(input, output, session) {
   selected_data <- reactive({
     if (input$year == "2000") {
@@ -242,6 +438,17 @@ server <- function(input, output, session) {
       lst_2020_sf
     }
   })
+  
+# Reactive function for socioeconomic vulnerability data
+socio_data <- reactive({
+  if (input$socio_year == "2000") {
+    SV_2000
+  } else if (input$socio_year == "2010") {
+    SV_2010
+  } else {
+    SV_2020
+  }
+})
   
   # Get the centroid
   centroid <- st_centroid(chi_bnd)
@@ -307,35 +514,47 @@ server <- function(input, output, session) {
       )
   })
   
-  # Render Demographic Map
-  output$demographic_map <- renderLeaflet({
-    # Example demographic data
-    data <- selected_data()
-    pal_demo <- colorNumeric(palette = "Blues", domain = data$demographic_variable) # Replace `demographic_variable`
-    
-    leaflet(data)|>
-      setView(lng = lng_philly, lat = lat_philly, zoom = 11) |>
-      addProviderTiles(providers$CartoDB.Positron, group = "CartoDB Positron") |>
-      addProviderTiles(providers$Esri.WorldImagery, group = "ESRI World Imagery") |>
-      addProviderTiles(providers$CartoDB.DarkMatter, group = "CartoDB Dark") |>
-      addLayersControl(
-        baseGroups = c("CartoDB Positron", "ESRI World Imagery", "CartoDB Dark"),
-        overlayGroups = c("Water Features", "Open Space"),
-        options = layersControlOptions(collapsed = TRUE)
-      ) |>
-      # Add water features
-      addPolygons(
-        data = water_sf,
-        color = "#40798c", weight = 0.5, fillOpacity = 1,
-        group = "Water Features"
-      ) |>
-      # Add open space
-      addPolygons(
-        data = open_space_sf,
-        color = "#cfe0c3", weight = 0.5, fillOpacity = 1,
-        group = "Open Space"
-      ) 
-  })
+
+  # Render socioeconomic vulnerability Map
+output$socioeconomic_vulnerability_map <- renderLeaflet({
+  data <- socio_data()  # Reactive soc_data
+
+  pal_demo <- colorNumeric(
+    palette = "Blues", 
+    domain = range(socio_data()$sccnmc_v, na.rm = TRUE)  #Vul score data
+  )
+  
+  leaflet(data) |>
+    setView(lng = lng_philly, lat = lat_philly, zoom = 11) |>
+    addProviderTiles(providers$CartoDB.Positron, group = "CartoDB Positron") |>
+    addProviderTiles(providers$Esri.WorldImagery, group = "ESRI World Imagery") |>
+    addProviderTiles(providers$CartoDB.DarkMatter, group = "CartoDB Dark") |>
+    addPolygons(
+      fillColor = ~pal_demo(sccnmc_v),
+      color = "white", weight = 0.5, fillOpacity = 1,
+      popup = ~paste0(
+        "GEOID: ", GEOID,
+        "<br>Socioeconomic Vulnerability Score: ", round(sccnmc_v, 2)
+      ),
+      group = "Socioeconomic Vulnerability"
+    ) |>
+    addPolygons(
+      data = water_sf,
+      color = "#40798c", weight = 0.5, fillOpacity = 1,
+      group = "Water Features"
+    ) |>
+    addPolygons(
+      data = open_space_sf,
+      color = "#cfe0c3", weight = 0.5, fillOpacity = 1,
+      group = "Open Space"
+    ) |>
+    addLayersControl(
+      baseGroups = c("CartoDB Positron", "ESRI World Imagery", "CartoDB Dark"),
+      overlayGroups = c("Socioeconomic Vulnerability", "Water Features", "Open Space"),
+      options = layersControlOptions(collapsed = TRUE)
+    )
+})
+
   
   # Render Heat Vulnerability Score Map
   output$heat_vulnerability_map <- renderLeaflet({
@@ -395,5 +614,3 @@ server <- function(input, output, session) {
 # Run the app
 shinyApp(ui, server)
 ```
-
-
